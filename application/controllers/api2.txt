@@ -1,0 +1,505 @@
+<?php
+defined('BASEPATH') or exit('No direct script access allowed');
+
+use setasign\Fpdi\Fpdi;
+use setasign\Fpdi\PdfReader;
+
+include APPPATH . 'third_party/fpdf/vendor/autoload.php';
+class Api extends CI_Controller
+{
+	public function __construct()
+	{
+		header('Access-Control-Allow-Origin: *');
+		header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE");
+		parent::__construct();
+	}
+	public function index()
+	{
+	}
+	public function invoiceList($userId = null, $invoiceId = null)
+	{
+		$this->load->model('apimodel');
+		$data = $this->apimodel->listInvoice($userId, $invoiceId);
+		$return = array("status" => "200", "data" => $data);
+		return $this->output->set_content_type('application/json')->set_status_header(200)->set_output(json_encode($return));
+	}
+
+	public function uploadPdf($clientId, $prefix = null)
+	{
+		$config['upload_path']          = './uploads/' . date("ym");
+		$config['allowed_types']        = 'jpg|pdf';
+		$config['max_size']             = 3072;
+		$config['file_name']			= $prefix . time() . rand(100, 999) . '-' . $clientId;
+
+
+		if (!is_dir($config['upload_path'])) mkdir($config['upload_path'], 0777, TRUE);
+
+
+		$this->load->library('upload', $config);
+
+		if (!$this->upload->do_upload('file')) {
+			$error = array('error' => $this->upload->display_errors());
+			$data["res"] = null;
+			$data["error"] = $error;
+		} else {
+			$response = array('upload_data' => $this->upload->data());
+			$newFilePath = $config["upload_path"] . '/' . $response["upload_data"]["orig_name"];
+			$newFilePath = str_replace('./', '', $newFilePath);
+			$data["res"] =  array("file_path" => $newFilePath);
+			$data["error"] = null;
+		}
+		$return = array("status" => "200", "data" => $data);
+		return $this->output->set_content_type('application/json')->set_status_header(200)->set_output(json_encode($return));
+	}
+	public function addInvoice()
+	{
+	    if (stripos($_SERVER["CONTENT_TYPE"], "application/json") == 0) {
+			$_POST = json_decode(file_get_contents("php://input"), true);
+		}
+		header('Content-Type: application/json');
+		if (isset($_POST["invoiceNumber"]) && !empty($_POST["invoiceNumber"]) && isset($_POST["invoice"]) && !empty($_POST["invoice"]) && isset($_POST["customerId"]) && !empty($_POST["customerId"])) {
+		
+			$invoiceNumber = $this->input->post('invoiceNumber', true);
+			$invoice = $this->input->post('invoice', true);
+			$customerId = $this->input->post('customerId', true);
+
+			$data = array(
+				'referenceNo' => 'INV' . time() . rand(100, 999),
+				'invoiceNo' => $invoiceNumber,
+				'invoiceStatus' => 'created',
+				'invoiceUrl' => $invoice,
+				'customerId' => $customerId,
+				'active' => 1
+			);
+			$res = $this->db->insert('invoice', $data);
+			if ($res) {
+				header('Status: 200');
+				$return = array("status" => "200", "data" => "Success");
+				echo json_encode($return);
+			} else {
+				header('Status: 401');
+				$return = array("status" => "401", "data" => "Invalid Datax");
+				echo json_encode($return);
+			}
+		} else {
+			// Validation Failed
+			$return = array("status" => "401", "data" => "Invalid Data");
+			header('Status: 401');
+			echo json_encode($return);
+		}
+	}
+	public function updateInvoice()
+	{
+		$json = file_get_contents("php://input");
+		$_POST = json_decode($json, true);
+
+		header('Content-Type: application/json');
+		if (isset($_POST["invoiceNumber"]) && !empty($_POST["invoiceNumber"]) && isset($_POST["data"]) && !empty($_POST["data"]) && isset($_POST["customerId"]) && !empty($_POST["customerId"])) {
+			$invoiceNumber = $this->input->post('invoiceNumber', true);
+			$data = $this->input->post('data', true);
+			$customerId = $this->input->post('customerId', true);
+
+			$this->db->where('referenceNo', $invoiceNumber);
+
+			$res = $this->db->update('invoice', $data);
+			if ($res) {
+				$return = array("status" => "200", "data" => "Success");
+				header('Status: 200');
+				echo json_encode($return);
+			} else {
+				$return = array("status" => "401", "data" => "Invalid Data");
+				header('Status: 401');
+				echo json_encode($return);
+			}
+		} else {
+			// Validation Failed
+			$return = array("status" => "401", "data" => "Invalid Data");
+			header('Status: 401');
+			echo json_encode($return);
+		}
+	}
+	public function addPayment()
+	{
+		if (stripos($_SERVER["CONTENT_TYPE"], "application/json") === 0) {
+			$_POST = json_decode(file_get_contents("php://input"), true);
+		}
+		// print_r($_POST);
+		header('Content-Type: application/json');
+		if (isset($_POST["invoiceId"]) && !empty($_POST["invoiceId"]) && isset($_POST["invoice"]) && !empty($_POST["invoice"])) {
+			$invoiceId = $this->input->post('invoiceId', true);
+			$payment = $this->input->post('invoice', true);
+
+			$data = array(
+				'invoiceId' => $invoiceId,
+				'paymentFile' => $payment,
+				'active' => 1
+			);
+			$res = $this->db->insert('invoicepayment', $data);
+			if ($res) {
+				$return = array("status" => "200", "data" => "Success");
+				header('Status: 200');
+				echo json_encode($return);
+			} else {
+				$return = array("status" => "401", "data" => "Invalid Data");
+				header('Status: 401');
+				echo json_encode($return);
+			}
+		} else {
+			// Validation Failed
+			$return = array("status" => "401", "data" => "Invalid Data");
+			header('Status: 401');
+			echo json_encode($return);
+		}
+	}
+	public function eSignInvoice()
+	{
+		if (stripos($_SERVER["CONTENT_TYPE"], "application/json") === 0) {
+			$_POST = json_decode(file_get_contents("php://input"), true);
+		}
+		// print_r($_POST);
+		header('Content-Type: application/json');
+		if (isset($_POST["invoiceNumber"]) && !empty($_POST["invoiceNumber"]) && isset($_POST["invoice"]) && !empty($_POST["invoice"]) && isset($_POST["eSign"]) && !empty($_POST["eSign"])) {
+			$invoiceId = $this->input->post('invoiceNumber', true);
+			$invoice = $this->input->post('invoice', true);
+			$eSign = $this->input->post('eSign', true);
+			$res = esign($invoice, $eSign);
+			if ($res) {
+				$return = array("status" => "200", "data" => "Success", "path" => $res);
+				header('Status: 200');
+				echo json_encode($return);
+			} else {
+				$return = array("status" => "401", "data" => "Invalid Data");
+				header('Status: 401');
+				echo json_encode($return);
+			}
+		} else {
+			// Validation Failed
+			$return = array("status" => "401", "data" => "Invalid Data");
+			header('Status: 401');
+			echo json_encode($return);
+		}
+	}
+
+
+	public function addUser()
+	{
+		if (stripos($_SERVER["CONTENT_TYPE"], "application/json") === 0) {
+			$_POST = json_decode(file_get_contents("php://input"), true);
+		}
+		header('Content-Type: application/json');
+		if (isset($_POST["name"]) && !empty($_POST["name"]) && isset($_POST["email"]) && !empty($_POST["email"]) && isset($_POST["creditLimit"]) && !empty($_POST["creditLimit"])) {
+			$name = $this->input->post('name', true);
+			$email = $this->input->post('email', true);
+			$creditLimit = $this->input->post('creditLimit', true);
+			$designation = $this->input->post('designation', true);
+			$country = $this->input->post('country', true);
+			$currency = $this->input->post('currency', true);
+			$expiry = $this->input->post('expiry', true);
+
+
+			$newPassword = randomPassword();
+
+			$data = array(
+				'name' => $name,
+				'emailId' => $email,
+				'creditLimit' => $creditLimit,
+				'designation' => $designation,
+				'country' => $country,
+				'currency' => $currency,
+				'expiryDate' => $expiry,
+				'active' => 1,
+				'status' => 1,
+				'password' => md5($newPassword)
+			);
+			$res = $this->db->insert('users', $data);
+		    if ($res) {
+
+                $to      = $email;
+                $subject = 'New User Created';
+                $message = 'Your temporary password is : ' . $newPassword;
+                $headers = 'From: no-reply@togglefinance.com' . "\r\n" .
+                    'X-Mailer: PHP/' . phpversion();
+                
+                mail($to, $subject, $message, $headers);
+
+				// echo $newPassword;
+
+
+				$return = array("status" => "200", "data" => "Success");
+				header('Status: 200');
+				echo json_encode($return);
+			} else {
+				$return = array("status" => "401", "data" => "Invalid Data");
+				header('Status: 401');
+				echo json_encode($return);
+			}
+		} else {
+			// Validation Failed
+			$return = array("status" => "401", "data" => "Invalid Data");
+			header('Status: 401');
+			echo json_encode($return);
+		}
+	}
+	public function userList()
+	{
+		$this->load->model('apimodel');
+		$data = $this->apimodel->listUser();
+		$return = array("status" => "200", "data" => $data);
+		return $this->output->set_content_type('application/json')->set_status_header(200)->set_output(json_encode($return));
+	}
+	public function updateUser($userId = null)
+	{
+		if (isset($userId) && !empty($userId)) {
+			$sql = "UPDATE users SET `active` = 1- `active` WHERE `id` = $userId";
+			$res = $this->db->query($sql);
+			$return = array("status" => "200", "data" => "status");
+			return $this->output->set_content_type('application/json')->set_status_header(200)->set_output(json_encode($return));
+		}
+	}
+	public function login()
+	{
+		header('Content-Type: application/json');
+		if (stripos($_SERVER["CONTENT_TYPE"], "application/json") === 0) {
+			$_POST = json_decode(file_get_contents("php://input"), true);
+		}
+		
+		if (isset($_POST["email"]) && !empty($_POST["email"]) && isset($_POST["password"]) && !empty($_POST["password"])) {
+			$email = $this->input->post('email', true);
+			$password = $this->input->post('password', true);
+
+			$query = $this->db->select('*')->where('active', 1)->where('status', 1)->where('emailId', $email)->where('password', md5($password))->limit(1)->get('users');
+			if ($query->num_rows() > 0) {
+				$res = $query->row_array();
+				unset($res["password"]);
+				$return = array("status" => "200", "data" => "Success", "res" => $res);
+				header('Status: 200');
+				echo json_encode($return);
+			} else {
+				$return = array("status" => "200", "data" => "Invalid Creds", "res" => 0);
+				header('Status: 200');
+				echo json_encode($return);
+			}
+		} else {
+			// Validation Failed
+			$return = array("status" => "401", "data" => "Invalid Data");
+			header('Status: 401');
+			echo json_encode($return);
+		}
+	}
+
+	public function updatePassword()
+	{
+		header('Content-Type: application/json');
+		if (stripos($_SERVER["CONTENT_TYPE"], "application/json") === 0) {
+			$_POST = json_decode(file_get_contents("php://input"), true);
+		}
+		if (isset($_POST["email"]) && !empty($_POST["email"]) && isset($_POST["password"]) && !empty($_POST["password"]) && isset($_POST["newPass"]) && !empty($_POST["newPass"])) {
+			$email = $this->input->post('email', true);
+			$password = $this->input->post('password', true);
+			$newPass = $this->input->post('newPass', true);
+
+			$newPass = md5($newPass);
+			$password = md5($password);
+			$sql = "UPDATE users SET password = '$newPass', firstLogin = 0 WHERE emailId = '$email' AND `password` = '$password' LIMIT 1";
+			$res = $this->db->query($sql);
+			if ($this->db->affected_rows() == 1) {
+				$res = 1;
+				$return = array("status" => "200", "data" => "Success", "res" => $res);
+				header('Status: 200');
+				echo json_encode($return);
+			} else {
+				$return = array("status" => "200", "data" => "Invalid Creds", "res" => 0);
+				header('Status: 401');
+				echo json_encode($return);
+			}
+		} else {
+			// Validation Failed
+			$return = array("status" => "401", "data" => "Invalid Data");
+			header('Status: 401');
+			echo json_encode($return);
+		}
+	}
+	public function resetPassword()
+	{
+		header('Content-Type: application/json');
+		if (stripos($_SERVER["CONTENT_TYPE"], "application/json") === 0) {
+			$_POST = json_decode(file_get_contents("php://input"), true);
+		}
+		
+		if (isset($_POST["email"]) && !empty($_POST["email"])) {
+			$email = $this->input->post('email', true);
+			$newPassword = randomPassword();
+
+			// echo $newPassword;
+
+
+			$newPass = md5($newPassword);
+			$sql = "UPDATE users SET password = '$newPass', firstLogin = 1 WHERE emailId = '$email' LIMIT 1";
+			$res = $this->db->query($sql);
+			if ($this->db->affected_rows() == 1) {
+				$res = 1;
+				
+				$to      = $email;
+                $subject = 'Password Reset Request';
+                $message = "Your account reset successfully and your temporary password is : " . $newPassword;
+                $headers = 'From: no-reply@togglefinance.com' . "\r\n" .
+                    'X-Mailer: PHP/' . phpversion();
+                
+                mail($to, $subject, $message, $headers);
+				
+				
+				$return = array("status" => "200", "data" => "Success", "res" => $res);
+				header('Status: 200');
+				echo json_encode($return);
+			} else {
+				$return = array("status" => "200", "data" => "Invalid Creds", "res" => 0);
+				header('Status: 200');
+				echo json_encode($return);
+			}
+		} else {
+			// Validation Failed
+			$return = array("status" => "401", "data" => "Invalid Data");
+			header('Status: 401');
+			echo json_encode($return);
+		}
+	}
+	public function loadDashboard($user = 0)
+	{
+		if ($user > 0) {
+			$query = $this->db->query("SELECT SUM(invoiceAmount) as usedCredit FROM invoice WHERE customerId = '$user' AND invoiceStatus = 'completed' GROUP BY customerId");
+
+			$query2 = $this->db->query("SELECT * FROM invoice WHERE customerId = '$user' AND invoiceStatus = 'completed'");
+
+            $usedCredit = 0;
+			if ($query->row()) {
+				$usedCredit = $query->row();
+				if (isset($usedCredit->usedCredit)) {
+					$usedCredit = $usedCredit->usedCredit;
+				} else {
+					$usedCredit = 0;
+				}
+			}
+			if ($query2->result_array()) {
+				$invoices = $query2->result_array();
+			} else {
+				$invoices = array();
+			}
+			$data = array('usedLimit' => $usedCredit, 'invoices' => $invoices);
+			$return = array("status" => "200", "data" => "Success", "res" => $data);
+			header('Status: 200');
+			echo json_encode($return);
+		}
+	}
+	public function loadDashboardAdmin()
+	{
+		$query = $this->db->query("SELECT COUNT(id) as users FROM users WHERE active = 1 AND status = 1");
+
+		$query2 = $this->db->query("SELECT SUM(invoiceAmount) as loanAmount FROM invoice WHERE invoiceStatus = 'completed'");
+    
+        $activeCustomers = 0;
+		if ($query->row()) {
+			$activeCustomers = $query->row();
+			if (isset($activeCustomers->users)) {
+				$activeCustomers = $activeCustomers->users;
+			} else {
+				$activeCustomers = 0;
+			}
+		}
+		$loanAmount = 0;
+		if ($query2->row()) {
+			$loanAmount = $query2->row();
+			if (isset($loanAmount->loanAmount)) {
+				$loanAmount = $loanAmount->loanAmount;
+			} else {
+				$loanAmount = 0;
+			}
+		}
+		$data = array('activeCustomers' => $activeCustomers, 'loanAmount' => $loanAmount);
+		$return = array("status" => "200", "data" => "Success", "res" => $data);
+		header('Status: 200');
+		echo json_encode($return);
+	}
+	public function paymentStatus($invoice = ''){
+		if($invoice != ''){
+			$query = $this->db->query("SELECT `paymentFile` FROM `invoicepayment` WHERE invoiceId = '$invoice' ORDER BY id DESC LIMIT 1");	
+			if ($query->row()) {
+				$paymentDetails = $query->row();
+			}else{
+				$paymentDetails = array();
+			}
+			$data = array('paymentDetails' => $paymentDetails);
+			$return = array("status" => "200", "data" => "Success", "res" => $data);
+			header('Status: 200');
+			echo json_encode($return);
+		}
+	}
+	public function currencyList(){
+	    $data = array("USD", "JOD");
+	    $return = array("status" => "200", "data" => "Success", "res" => $data);
+		header('Status: 200');
+		echo json_encode($return);
+	}
+}
+
+
+
+
+function esign($fileName, $eSign)
+{
+	$pdf = new Fpdi();
+	$pdf->addPage();
+	$pdf->setSourceFile($fileName);
+	$tplIdx = $pdf->importPage(1);
+	$pdf->useTemplate($tplIdx, 10, 10, 200);
+	$pdf->AddFont('MsMadi-Regular', '', 'MsMadi-Regular.php', 32);
+
+	$pdf->SetTextColor(160, 64, 0);
+	$pdf->SetFont('MsMadi-Regular', '', 20);
+	$pdf->SetXY(-60, -30);
+	$pdf->Write(0, $eSign);
+	$pdf->SetTextColor(0, 0, 0);
+	$pdf->SetFont('Arial', 'B', 6);
+	$pdf->SetXY(-60, -24);
+	$pdf->Write(0, date("d M Y h:i:s A"));
+	$pdf->SetFont('Arial', 'B', 5);
+	$pdf->SetXY(-60, -22);
+	$pdf->Write(0, "Client Ip : " . get_client_ip());
+	$newPath = str_replace('uploads/', 'uploads/signed/', $fileName);
+	$path = explode('/', $newPath);
+	$path = str_replace($path[count($path) - 1], '', $newPath);
+	if (!file_exists($path)) {
+		mkdir($path, 0777, true);
+	}
+	$pdf->Output($newPath, "F");
+	return $newPath;
+}
+function get_client_ip()
+{
+	$ipaddress = '';
+	if (getenv('HTTP_CLIENT_IP'))
+		$ipaddress = getenv('HTTP_CLIENT_IP');
+	else if (getenv('HTTP_X_FORWARDED_FOR'))
+		$ipaddress = getenv('HTTP_X_FORWARDED_FOR');
+	else if (getenv('HTTP_X_FORWARDED'))
+		$ipaddress = getenv('HTTP_X_FORWARDED');
+	else if (getenv('HTTP_FORWARDED_FOR'))
+		$ipaddress = getenv('HTTP_FORWARDED_FOR');
+	else if (getenv('HTTP_FORWARDED'))
+		$ipaddress = getenv('HTTP_FORWARDED');
+	else if (getenv('REMOTE_ADDR'))
+		$ipaddress = getenv('REMOTE_ADDR');
+	else
+		$ipaddress = 'UNKNOWN';
+	return $ipaddress;
+}
+function randomPassword()
+{
+	$alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890';
+	$pass = array(); //remember to declare $pass as an array
+	$alphaLength = strlen($alphabet) - 1; //put the length -1 in cache
+	for ($i = 0; $i < 14; $i++) {
+		$n = rand(0, $alphaLength);
+		$pass[] = $alphabet[$n];
+	}
+	return implode($pass); //turn the array into a string
+}

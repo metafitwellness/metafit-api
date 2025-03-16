@@ -1,0 +1,1 @@
+[29-Jan-2025 11:30:59 Asia/Kolkata] PHP Fatal error:  Cannot redeclare Api::countryList() in /home/freewayw/public_html/demo/metafit/server/application/controllers/Api.php on line 537

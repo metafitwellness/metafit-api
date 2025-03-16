@@ -1,0 +1,13 @@
+{
+    "name": "test/package",
+    "description": "test",
+    "require": {
+            "setasign/fpdf": "1.8.*",
+            "setasign/fpdi": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Test\\Package\\": "src/"
+        }
+    }
+}
