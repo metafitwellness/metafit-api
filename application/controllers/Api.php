@@ -553,6 +553,86 @@ class Api extends CI_Controller
 			echo json_encode($return);
 		}
 	}
+	public function add_blog() {
+		header('Content-Type: application/json');
+
+		if (stripos($_SERVER["CONTENT_TYPE"], "application/json") === 0) {
+			$_POST = json_decode(file_get_contents("php://input"), true);
+		}
+	   // if(isset($_POST['name']) && isset($_POST['des']) && isset($_POST['status']) && isset($_POST['url']) && isset($_POST['date'])) {
+// 		$data = $data1 = $_POST;
+// 		echo $_POST['name']; die();
+			$blogData = [
+				'name' => $_POST['name'],
+				'des' => $_POST['des'],
+				'date' => $_POST['date'],
+				'status' => $_POST['status'],
+				'url' => $_POST['url'],
+			];
+
+			if (isset($_FILES['img']) && !empty($_FILES['img']['name'])) {
+				$imageInfo = $this->uploadAndCompressImage($_FILES['img']);
+				$blogData['img'] = $imageInfo['imageName'];
+			}
+			$this->db->insert('blog', $blogData); 
+			// Return success response
+			$return = array("status" => "200", "data" => "Success", "res" => "success");
+			header('Status: 200');
+			echo json_encode($return);
+// 		} else {
+// 			// Return error response if required fields are missing or invalid
+// 			$return = array("status" => "401", "data" => "Invalid Data");
+// 			header('Status: 401');
+// 			echo json_encode($return);
+// 		}
+	}
+
+	public function update_blog($id){
+		header('Content-Type: application/json');
+
+		if (stripos($_SERVER["CONTENT_TYPE"], "application/json") === 0) {
+			$_POST = json_decode(file_get_contents("php://input"), true);
+		}
+		
+//         if(isset($_POST['name']) && isset($_POST['des']) && isset($_POST['status']) && isset($_POST['url']) && isset($_POST['date'])) {
+// 			$data = $data1 = $_POST;
+			$blogData = [
+				'name' => $_POST['name'],
+				'des' => $_POST['des'],
+				'date' => $_POST['date'],
+				'status' => $_POST['status'],
+				'url' => $_POST['url'],
+				'photochanged' => $_POST['photochanged'],
+			];
+            if($_POST['photochanged'] == 'true'){
+                if (isset($_FILES['img']) && !empty($_FILES['img']['name'])) {
+    				$imageInfo = $this->uploadAndCompressImage($_FILES['img']);
+    				$blogData['img'] = $imageInfo['imageName'];
+            	}
+            } else {
+                $blogData['img'] = $_POST['img'];
+            }
+			
+			$this->db->where('id', $id);
+            $this->db->update('blog', $blogData); 
+			// Return success response
+			$return = array("status" => "200", "data" => "Success", "res" => "success");
+			header('Status: 200');
+			echo json_encode($return);
+// 		} else {
+// 			// Return error response if required fields are missing or invalid
+// 			$return = array("status" => "401", "data" => "Invalid Data");
+// 			header('Status: 401');
+// 			echo json_encode($return);
+// 		}
+	}
+	
+	public function get_blogs()
+	{
+		$this->load->model('apimodel');
+		$city = $this->apimodel->get_blogs();
+		echo json_encode($city);
+	}
 
 	public function get_segments()
 	{
@@ -653,62 +733,103 @@ class Api extends CI_Controller
 	
 	public function get_vendors_list()
     {
-        // Query to get user data with joins on users_profile, cities, and segments
-        $this->db->select('u.id as user_id, u.name as user_name, u.emailId, u.phoneNumber, u.accountStatus as accountStatus, u.verificationStatus as verificationStatus, u.addedOn,
-                            up.Designation, up.homeAddress, up.officeAddress, up.Degree, up.passoutYear, up.yearsOfExperience, 
-                            c.city_name, s.segement as segment_name');
+        // Step 1: Fetch all user info including segment ID string
+        $this->db->select('
+            u.id as user_id,
+            u.name as user_name,
+            u.emailId,
+            u.phoneNumber,
+            u.accountStatus as accountStatus,
+            u.verificationStatus as verificationStatus,
+            u.addedOn,
+            u.segment as segment_ids,
+            up.Designation,
+            up.homeAddress,
+            up.officeAddress,
+            up.Degree,
+            up.passoutYear,
+            up.yearsOfExperience,
+            c.city_name
+        ');
         $this->db->from('users u');
         $this->db->join('users_profile up', 'u.id = up.userId', 'left');
         $this->db->join('cities c', 'u.city = c.id', 'left');
-        $this->db->join('segments s', 'u.segment = s.id', 'left');
-        $this->db->where('u.active', 1); // You can modify the conditions as needed
+        $this->db->where('u.active', 1);
         $this->db->where('u.admin', 0);
+        $this->db->group_by('u.id');
+    
         $query = $this->db->get();
-
-        // Check if there are results
+    
         if ($query->num_rows() > 0) {
-            $data = $query->result_array(); // Get result as an array
-            // Send the response as JSON
+            $data = $query->result_array();
+    
+            // Step 2: Fetch all segments in advance to map IDs to names
+            $segments_lookup = [];
+            $segments_query = $this->db->get('segments');
+            foreach ($segments_query->result_array() as $segment) {
+                $segments_lookup[$segment['id']] = $segment['segement'];
+            }
+    
+            // Step 3: Replace segment IDs with names for each user
+            foreach ($data as &$user) {
+                $segment_ids = explode(',', $user['segment_ids']);
+                $segment_names = [];
+    
+                foreach ($segment_ids as $seg_id) {
+                    $seg_id = trim($seg_id);
+                    if (isset($segments_lookup[$seg_id])) {
+                        $segment_names[] = $segments_lookup[$seg_id];
+                    }
+                }
+    
+                $user['segment_name'] = implode(', ', $segment_names);
+                unset($user['segment_ids']); // Optional: remove raw segment IDs from output
+            }
+    
             echo json_encode(['status' => 'success', 'data' => $data]);
         } else {
-            // No users found
             echo json_encode(['status' => 'error', 'message' => 'No users found']);
         }
     }
+
+
 	public function get_onboarding_list() {
-        $this->load->model('apimodel');
-        
-        $data = $this->apimodel->get_onboarding_list();
-
-        // Check if the data exists
-        if (!empty($data)) {
-            // Return the data as JSON
-            $this->output
-                ->set_content_type('application/json')
-                ->set_status_header(200)
-                ->set_output(json_encode(['status' => 'success', 'data' => $data]));
-        } else {
-            // No data found
-            $this->output
-                ->set_content_type('application/json')
-                ->set_status_header(404)
-                ->set_output(json_encode(['status' => 'error', 'message' => 'No data found']));
-        }
-    }
+            $this->load->model('apimodel');
+            
+            $data = $this->apimodel->get_onboarding_list();
     
-    public function update_user_admin() {
+            // Check if the data exists
+            if (!empty($data)) {
+                // Return the data as JSON
+                $this->output
+                    ->set_content_type('application/json')
+                    ->set_status_header(200)
+                    ->set_output(json_encode(['status' => 'success', 'data' => $data]));
+            } else {
+                // No data found
+                $this->output
+                    ->set_content_type('application/json')
+                    ->set_status_header(404)
+                    ->set_output(json_encode(['status' => 'error', 'message' => 'No data found']));
+            }
+        }
+        
+        public function update_user_admin() {
         header('Content-Type: application/json');
-
+    
         // Get JSON input data
         $data = json_decode(file_get_contents("php://input"), true);
-
+        $data = $_POST;
+        // print_r($data);
+    
         if (!isset($data['id'])) {
             echo json_encode(['status' => false, 'message' => 'User ID is required']);
             return;
         }
-
+    
         $userId = $data['id'];
-
+    
+        // Prepare user data
         $userData = [
             'name'              => $data['user_name'] ?? null,
             'segment'           => $data['segment_name'] ?? null,
@@ -717,8 +838,8 @@ class Api extends CI_Controller
             'phoneNumber'       => $data['phoneNumber'] ?? null
         ];
         $userData = array_filter($userData, function ($value) { return $value !== null; });
-
-        // Prepare user_profile table update data
+    
+        // Prepare user profile table update data
         $profileData = [
             'Designation'           => $data['designation'] ?? null,
             'homeAddress'           => $data['homeAddress'] ?? null,
@@ -735,11 +856,32 @@ class Api extends CI_Controller
             'alternative_contact'   => $data['alternative_contact'] ?? null
         ];
         $profileData = array_filter($profileData, function ($value) { return $value !== null; });
-
+    
+        // Handle image uploads only if images are provided (photos are optional)
+        if (isset($_FILES['self_photo']) && !empty($_FILES['self_photo']['name'])) {
+            $profileData['self_photo'] = $this->uploadAndCompressImage($_FILES['self_photo'])['imageName'];
+        }
+    
+        if (isset($_FILES['aadhar_photo']) && !empty($_FILES['aadhar_photo']['name'])) {
+            $profileData['aadhar_photo'] = $this->uploadAndCompressImage($_FILES['aadhar_photo'])['imageName'];
+        }
+    
+        if (isset($_FILES['clinic_photo']) && !empty($_FILES['clinic_photo']['name'])) {
+            $profileData['clinic_photo'] = $this->uploadAndCompressImage($_FILES['clinic_photo'])['imageName'];
+        }
+    
+        if (isset($_FILES['pan_card_photo_front']) && !empty($_FILES['pan_card_photo_front']['name'])) {
+            $profileData['pan_card_photo_front'] = $this->uploadAndCompressImage($_FILES['pan_card_photo_front'])['imageName'];
+        }
+    
+        if (isset($_FILES['pan_card_photo_back']) && !empty($_FILES['pan_card_photo_back']['name'])) {
+            $profileData['pan_card_photo_back'] = $this->uploadAndCompressImage($_FILES['pan_card_photo_back'])['imageName'];
+        }
+    
+        // Load the model and update user data
         $this->load->model('apimodel');
-        
         $result = $this->apimodel->update_user_and_profile($userId, $userData, $profileData);
-
+    
         if ($result) {
             echo json_encode(['status' => true, 'message' => 'User updated successfully']);
         } else {
@@ -747,7 +889,301 @@ class Api extends CI_Controller
         }
     }
     
-}
+    public function addSeoPage() {
+        $this->load->helper(['url', 'form']);
+        $this->load->library('upload');
+    
+        // Use raw $_POST instead of $this->input->post()
+        $data = $_POST;
+    
+        $img = '';
+    
+        // Handle image upload
+        if (!empty($_FILES['img']['name'])) {
+            $config['upload_path'] = './uploads/seo_images/';
+            $config['allowed_types'] = 'jpg|jpeg|png|gif|webp';
+            $config['file_name'] = time() . '_' . $_FILES['img']['name'];
+    
+            if (!is_dir($config['upload_path'])) {
+                mkdir($config['upload_path'], 0777, true);
+            }
+    
+            $this->upload->initialize($config);
+    
+            if ($this->upload->do_upload('img')) {
+                $imgData = $this->upload->data();
+                $img = $imgData['file_name'];
+            } else {
+                echo json_encode(['status' => false, 'message' => $this->upload->display_errors()]);
+                return;
+            }
+        }
+    
+        // Check if required fields exist
+        $requiredFields = ['name', 'date', 'des', 'status', 'footer_status', 'url'];
+        foreach ($requiredFields as $field) {
+            if (!isset($data[$field]) || $data[$field] === '') {
+                echo json_encode(['status' => false, 'message' => "Missing required field: $field"]);
+                return;
+            }
+        }
+    
+        $insertData = [
+            'name' => $data['name'],
+            'date' => $data['date'],
+            'img' => $img,
+            'des' => $data['des'],
+            'status' => ($data['status'] === 'active' ? 1 : 0),
+            'footer_status' => ($data['footer_status'] === 'yes' ? 1 : 0),
+            'url' => $data['url']
+        ];
+    
+        $this->db->insert('seo_page', $insertData);
+        echo json_encode(['status' => true, 'message' => 'SEO Page added successfully']);
+    }
+
+    public function updateSeoPage($id) {
+        $this->load->helper(['url', 'form']);
+        $this->load->library('upload');
+    
+        // Use raw $_POST
+        $data = $_POST;
+        // print_r($_POST);
+    
+        // Fetch existing row
+        $existing = $this->db->get_where('seo_page', ['id' => $id])->row();
+    
+        if (!$existing) {
+            echo json_encode(['status' => false, 'message' => 'Record not found']);
+            return;
+        }
+    
+        // Default image is existing one
+        $img = $existing->img;
+    
+        // If new image is uploaded
+        if (!empty($_FILES['img']['name'])) {
+            $config['upload_path'] = './uploads/seo_images/';
+            $config['allowed_types'] = 'jpg|jpeg|png|gif|webp';
+            $config['file_name'] = time() . '_' . $_FILES['img']['name'];
+    
+            if (!is_dir($config['upload_path'])) {
+                mkdir($config['upload_path'], 0777, true);
+            }
+    
+            $this->upload->initialize($config);
+    
+            if ($this->upload->do_upload('img')) {
+                $imgData = $this->upload->data();
+                $img = $imgData['file_name'];
+            } else {
+                echo json_encode(['status' => false, 'message' => $this->upload->display_errors()]);
+                return;
+            }
+        }
+    
+        // Validate required fields
+        $requiredFields = ['name', 'date', 'des', 'status', 'footer_status', 'url'];
+        foreach ($requiredFields as $field) {
+            if (!isset($data[$field]) || $data[$field] === '') {
+                echo json_encode(['status' => false, 'message' => "Missing required field: $field"]);
+                return;
+            }
+        }
+    
+        // Prepare update data
+        $updateData = [
+            'name' => $data['name'],
+            'date' => $data['date'],
+            'des' => $data['des'],
+            'status' => ($data['status'] == 'active' ? 1 : 0),
+            'footer_status' => ($data['footer_status'] == 'yes' ? 1 : 0),
+            'url' => $data['url']
+        ];
+        
+        if($img){
+            $updateData["img"] = $img;
+        }
+    
+        $this->db->where('id', $id);
+        $this->db->update('seo_page', $updateData);
+    
+        echo json_encode(['status' => true, 'message' => 'SEO Page updated successfully']);
+    }
+    
+    public function getSeoPages() {
+        header('Content-Type: application/json');
+        header("Access-Control-Allow-Origin: *");
+        
+    
+        $this->load->database();
+        $id = $this->input->get('id');
+    
+        if ($id) {
+            $query = $this->db->get_where('seo_page', ['id' => $id]);
+            $result = $query->row();
+            if ($result) {
+                echo json_encode(['status' => true, 'data' => $result]);
+            } else {
+                echo json_encode(['status' => false, 'message' => 'No record found.']);
+            }
+        } else {
+            $this->db->order_by('id', 'DESC');
+            $query = $this->db->get('seo_page');
+            $result = $query->result();
+            echo json_encode(['status' => true, 'data' => $result]);
+        }
+    }
+    
+    
+    public function addBlog() {
+        $this->load->helper(['url', 'form']);
+        $this->load->library('upload');
+    
+        // Use raw $_POST instead of $this->input->post()
+        $data = $_POST;
+    
+        $img = '';
+    
+        // Handle image upload
+        if (!empty($_FILES['img']['name'])) {
+            $config['upload_path'] = './uploads/blogs/';
+            $config['allowed_types'] = 'jpg|jpeg|png|gif|webp';
+            $config['file_name'] = time() . '_' . $_FILES['img']['name'];
+    
+            if (!is_dir($config['upload_path'])) {
+                mkdir($config['upload_path'], 0777, true);
+            }
+    
+            $this->upload->initialize($config);
+    
+            if ($this->upload->do_upload('img')) {
+                $imgData = $this->upload->data();
+                $img = $imgData['file_name'];
+            } else {
+                echo json_encode(['status' => false, 'message' => $this->upload->display_errors()]);
+                return;
+            }
+        }
+    
+        // Check if required fields exist
+        $requiredFields = ['name', 'date', 'des', 'status', 'footer_status', 'url'];
+        foreach ($requiredFields as $field) {
+            if (!isset($data[$field]) || $data[$field] === '') {
+                echo json_encode(['status' => false, 'message' => "Missing required field: $field"]);
+                return;
+            }
+        }
+    
+        $insertData = [
+            'name' => $data['name'],
+            'date' => $data['date'],
+            'img' => $img,
+            'des' => $data['des'],
+            'status' => ($data['status'] === 'active' ? 1 : 0),
+            'footer_status' => ($data['footer_status'] === 'yes' ? 1 : 0),
+            'url' => $data['url']
+        ];
+    
+        $this->db->insert('blog', $insertData);
+        echo json_encode(['status' => true, 'message' => 'SEO Page added successfully']);
+    }
+
+    public function updateBlog($id) {
+        $this->load->helper(['url', 'form']);
+        $this->load->library('upload');
+    
+        // Use raw $_POST
+        $data = $_POST;
+        // print_r($_POST);
+    
+        // Fetch existing row
+        $existing = $this->db->get_where('blog', ['id' => $id])->row();
+    
+        if (!$existing) {
+            echo json_encode(['status' => false, 'message' => 'Record not found']);
+            return;
+        }
+    
+        // Default image is existing one
+        $img = $existing->img;
+    
+        // If new image is uploaded
+        if (!empty($_FILES['img']['name'])) {
+            $config['upload_path'] = './uploads/blogs/';
+            $config['allowed_types'] = 'jpg|jpeg|png|gif|webp';
+            $config['file_name'] = time() . '_' . $_FILES['img']['name'];
+    
+            if (!is_dir($config['upload_path'])) {
+                mkdir($config['upload_path'], 0777, true);
+            }
+    
+            $this->upload->initialize($config);
+    
+            if ($this->upload->do_upload('img')) {
+                $imgData = $this->upload->data();
+                $img = $imgData['file_name'];
+            } else {
+                echo json_encode(['status' => false, 'message' => $this->upload->display_errors()]);
+                return;
+            }
+        }
+    
+        // Validate required fields
+        $requiredFields = ['name', 'date', 'des', 'status', 'footer_status', 'url'];
+        foreach ($requiredFields as $field) {
+            if (!isset($data[$field]) || $data[$field] === '') {
+                echo json_encode(['status' => false, 'message' => "Missing required field: $field"]);
+                return;
+            }
+        }
+    
+        // Prepare update data
+        $updateData = [
+            'name' => $data['name'],
+            'date' => $data['date'],
+            'des' => $data['des'],
+            'status' => ($data['status'] == 'active' ? 1 : 0),
+            'footer_status' => ($data['footer_status'] == 'yes' ? 1 : 0),
+            'url' => $data['url']
+        ];
+        
+        if($img){
+            $updateData["img"] = $img;
+        }
+    
+        $this->db->where('id', $id);
+        $this->db->update('blog', $updateData);
+    
+        echo json_encode(['status' => true, 'message' => 'SEO Page updated successfully']);
+    }
+    
+    public function getBlogs() {
+        header('Content-Type: application/json');
+        header("Access-Control-Allow-Origin: *");
+        
+    
+        $this->load->database();
+        $id = $this->input->get('id');
+    
+        if ($id) {
+            $query = $this->db->get_where('blog', ['id' => $id]);
+            $result = $query->row();
+            if ($result) {
+                echo json_encode(['status' => true, 'data' => $result]);
+            } else {
+                echo json_encode(['status' => false, 'message' => 'No record found.']);
+            }
+        } else {
+            $this->db->order_by('id', 'DESC');
+            $query = $this->db->get('blog');
+            $result = $query->result();
+            echo json_encode(['status' => true, 'data' => $result]);
+        }
+    }
+
+
+} 
 
 
 function get_client_ip()
